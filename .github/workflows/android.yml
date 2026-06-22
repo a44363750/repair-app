@@ -1,0 +1,75 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+
+      - name: Install Android SDK components
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+        env:
+          CAPACITOR_SERVER_URL: http://10.50.3.81
+
+      - name: Build Android APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+        env:
+          JAVA_HOME: /opt/java/openjdk
+
+      - name: Upload APK as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 物业维修管理
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 5
+
+      - name: Copy APK to server via SCP
+        env:
+          SERVER_HOST: 10.50.3.81
+          SERVER_USER: wh
+          SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
+        run: |
+          # Install sshpass for password-based SCP
+          apt-get update && apt-get install -y sshpass || true
+          # Copy APK to server
+          sshpass -p "$SERVER_PASSWORD" scp -o StrictHostKeyChecking=no \
+            android/app/build/outputs/apk/debug/app-debug.apk \
+            $SERVER_USER@$SERVER_HOST:/opt/wh/frontend/android/app/build/outputs/apk/debug/app-debug.apk
+          # Rename to Chinese filename
+          sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no \
+            $SERVER_USER@$SERVER_HOST \
+            "cp /opt/wh/frontend/android/app/build/outputs/apk/debug/app-debug.apk /opt/wh/frontend/android/app/build/outputs/apk/debug/物业维修管理.apk"
+        continue-on-error: true
