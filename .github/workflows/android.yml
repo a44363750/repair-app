@@ -52,13 +52,12 @@ jobs:
           CAPACITOR_SERVER_URL: http://10.50.3.81
         run: npm run build
 
-      - name: Add Android platform
+      - name: Sync Capacitor
         env:
+          CAPACITOR_SERVER_URL: http://10.50.3.81
           ANDROID_HOME: $HOME/android-sdk
           ANDROID_SDK_ROOT: $HOME/android-sdk
-        run: |
-          npx cap add android
-          npx cap sync android
+        run: npx cap sync android
 
       - name: Build Android APK
         env:
