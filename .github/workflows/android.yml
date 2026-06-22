@@ -19,7 +19,7 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install npm dependencies
         run: npm ci
 
       - name: Setup Java
@@ -28,48 +28,57 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v2
-
-      - name: Install Android SDK components
+      - name: Download Android SDK command-line tools
         run: |
+          mkdir -p $HOME/android-sdk/cmdline-tools
+          cd $HOME/android-sdk/cmdline-tools
+          curl -sL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o cmdline-tools.zip
+          unzip -q cmdline-tools.zip
+          mv cmdline-tools latest
+
+      - name: Accept licenses and install SDK components
+        env:
+          ANDROID_HOME: $HOME/android-sdk
+          ANDROID_SDK_ROOT: $HOME/android-sdk
+        run: |
+          export ANDROID_HOME=$HOME/android-sdk
+          export ANDROID_SDK_ROOT=$HOME/android-sdk
+          export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
       - name: Sync Capacitor
-        run: npx cap sync android
         env:
           CAPACITOR_SERVER_URL: http://10.50.3.81
+          ANDROID_HOME: $HOME/android-sdk
+          ANDROID_SDK_ROOT: $HOME/android-sdk
+        run: npx cap sync android
 
       - name: Build Android APK
+        env:
+          JAVA_HOME: /opt/java/openjdk
+          ANDROID_HOME: $HOME/android-sdk
+          ANDROID_SDK_ROOT: $HOME/android-sdk
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
-        env:
-          JAVA_HOME: /opt/java/openjdk
+          ./gradlew assembleDebug --no-daemon -q
 
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: 物业维修管理
+          name: app-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 5
 
       - name: Copy APK to server via SCP
+        if: always()
         env:
           SERVER_HOST: 10.50.3.81
           SERVER_USER: wh
           SERVER_PASSWORD: ${{ secrets.SERVER_PASSWORD }}
         run: |
-          # Install sshpass for password-based SCP
-          apt-get update && apt-get install -y sshpass || true
-          # Copy APK to server
-          sshpass -p "$SERVER_PASSWORD" scp -o StrictHostKeyChecking=no \
-            android/app/build/outputs/apk/debug/app-debug.apk \
-            $SERVER_USER@$SERVER_HOST:/opt/wh/frontend/android/app/build/outputs/apk/debug/app-debug.apk
-          # Rename to Chinese filename
-          sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no \
-            $SERVER_USER@$SERVER_HOST \
-            "cp /opt/wh/frontend/android/app/build/outputs/apk/debug/app-debug.apk /opt/wh/frontend/android/app/build/outputs/apk/debug/物业维修管理.apk"
+          apt-get update -qq && apt-get install -y -qq sshpass > /dev/null 2>&1 || true
+          sshpass -p "$SERVER_PASSWORD" scp -o StrictHostKeyChecking=no -o ConnectTimeout=10             android/app/build/outputs/apk/debug/app-debug.apk             $SERVER_USER@$SERVER_HOST:/opt/wh/frontend/android/app/build/outputs/apk/debug/app-debug.apk
+          sshpass -p "$SERVER_PASSWORD" ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST             "cp /opt/wh/frontend/android/app/build/outputs/apk/debug/app-debug.apk '/opt/wh/frontend/android/app/build/outputs/apk/debug/物业维修管理.apk'"
         continue-on-error: true
