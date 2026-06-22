@@ -47,12 +47,18 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
 
-      - name: Sync Capacitor
+      - name: Build web app
         env:
           CAPACITOR_SERVER_URL: http://10.50.3.81
+        run: npm run build
+
+      - name: Add Android platform
+        env:
           ANDROID_HOME: $HOME/android-sdk
           ANDROID_SDK_ROOT: $HOME/android-sdk
-        run: npx cap sync android
+        run: |
+          npx cap add android
+          npx cap sync android
 
       - name: Build Android APK
         env:
