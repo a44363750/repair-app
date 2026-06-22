@@ -9,8 +9,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      ANDROID_HOME: ${{ runner.os == 'Linux' && '$HOME/android-sdk' || 'C:\android-sdk' }}
-      ANDROID_SDK_ROOT: ${{ runner.os == 'Linux' && '$HOME/android-sdk' || 'C:\android-sdk' }}
+      ANDROID_HOME: /home/runner/work/_runner/android-sdk
 
     steps:
       - name: Checkout code
@@ -33,16 +32,14 @@ jobs:
 
       - name: Download Android SDK command-line tools
         run: |
-          mkdir -p $HOME/android-sdk/cmdline-tools
-          cd $HOME/android-sdk/cmdline-tools
+          mkdir -p $ANDROID_HOME/cmdline-tools
+          cd $ANDROID_HOME/cmdline-tools
           curl -sL https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip -o cmdline-tools.zip
           unzip -q cmdline-tools.zip
           mv cmdline-tools latest
 
       - name: Accept licenses and install SDK components
         run: |
-          export ANDROID_HOME=$HOME/android-sdk
-          export ANDROID_SDK_ROOT=$HOME/android-sdk
           export PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
@@ -60,7 +57,6 @@ jobs:
       - name: Create local.properties
         run: |
           echo "sdk.dir=$ANDROID_HOME" > android/local.properties
-          echo "java.dir=$JAVA_HOME" >> android/local.properties
           cat android/local.properties
 
       - name: Build Android APK
