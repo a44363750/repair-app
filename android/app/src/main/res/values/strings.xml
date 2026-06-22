@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">物业维修管理</string>
+    <string name="title_activity_main">物业维修管理</string>
+    <string name="package_name">com.wh.repair</string>
+    <string name="custom_url_scheme">com.wh.repair</string>
+</resources>

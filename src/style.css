@@ -1,0 +1,36 @@
+/* 全局样式 */
+:root {
+  --primary-color: #409eff;
+  --success-color: #67c23a;
+  --warning-color: #e6a23c;
+  --danger-color: #f56c6c;
+  --info-color: #909399;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+}
+
+/* 页面标题 */
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 20px;
+  color: #303133;
+}
+
+/* 卡片样式 */
+.el-card {
+  border-radius: 4px;
+}
+
+/* 表格样式 */
+.el-table {
+  font-size: 14px;
+}
+
+/* 按钮样式 */
+.el-button + .el-button {
+  margin-left: 10px;
+}

@@ -1,0 +1,15 @@
+{
+  "appId": "com.wh.repair",
+  "appName": "物业维修管理",
+  "webDir": "dist",
+  "server": {
+    "url": "http://10.50.3.81",
+    "androidScheme": "http"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "backgroundColor": "#409EFF"
+    }
+  }
+}
