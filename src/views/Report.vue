@@ -38,29 +38,6 @@
         </el-form-item>
       </el-form>
     </el-card>
-
-    <!-- 扫码摄像头对话框 -->
-    <el-dialog
-      v-model="scanDialogVisible"
-      title="扫码资产编号"
-      width="420px"
-      :close-on-click-modal="true"
-      destroy-on-close
-      @opened="onDialogOpened"
-      @close="onDialogClose"
-    >
-      <div style="text-align:center">
-        <video ref="videoEl" autoplay playsinline muted style="width:100%;max-width:360px;border-radius:8px;border:1px solid #ddd;background:#000"></video>
-        <div style="margin-top:12px;color:#666;font-size:13px">
-          <span v-if="scanning">🔍 对准二维码扫描中...</span>
-          <span v-else-if="scanError" style="color:#e6a23c">{{ scanError }}</span>
-          <span v-else>⏳ 正在打开摄像头...</span>
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="closeScanner">关闭</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -68,19 +45,13 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
+import { BarcodeScanner } from '@capacitor-community/barcode-scanner'
 import { repairApi } from '../api'
 
 const route = useRoute()
 const formRef = ref()
 const submitting = ref(false)
 const assetInfo = ref(null)
-const scanDialogVisible = ref(false)
-const videoEl = ref()
-let mediaStream = null
-let detectTimer = null
-let barcodeDetector = null
-const scanning = ref(false)
-const scanError = ref('')
 
 const form = ref({
   asset_code: '', asset_name: '', fault_location: '', fault_description: '',
@@ -93,87 +64,25 @@ const rules = {
   contact_phone: [{ required: true, message: '请输入电话', trigger: 'blur' }]
 }
 
-/** 打开对话框（仅设置 visible，实际初始化在 @opened 钩子中） */
-const openScanner = () => {
-  scanError.value = ''
-  scanning.value = false
-  scanDialogVisible.value = true
-}
-
-/** dialog 动画完成、DOM 已挂载后触发 */
-const onDialogOpened = async () => {
-  // 此时 videoEl 必定已渲染
-  if (!videoEl.value) {
-    scanError.value = '视频组件未就绪，请刷新页面后重试'
-    return
-  }
+const openScanner = async () => {
   try {
-    // 检查浏览器能力
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('您的浏览器不支持摄像头调用，请使用 Chrome/Edge 浏览器')
-    }
-    if ('BarcodeDetector' in window) {
-      barcodeDetector = new window.BarcodeDetector({ formats: ['qr_code', 'code_128', 'code_39'] })
-    } else {
-      console.warn('BarcodeDetector not supported, scan disabled')
-    }
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: 640, height: 480 }
-    })
-    videoEl.value.srcObject = mediaStream
-    await videoEl.value.play()
-    scanning.value = true
-    detectBarcode()
-  } catch (e) {
-    const msg = e.message || String(e)
-    if (msg.includes('Permission') || msg.includes('NotAllowed') || msg.includes('PermissionDenied')) {
-      scanError.value = '摄像头权限被拒绝，请在浏览器地址栏左侧点击📷图标允许摄像头访问'
-    } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound')) {
-      scanError.value = '未检测到摄像头设备'
-    } else if (msg.includes('NotReadable') || msg.includes('TrackStart')) {
-      scanError.value = '摄像头被其他程序占用'
-    } else if (msg.includes('NotSupportedError') || msg.includes('secure context')) {
-      scanError.value = '当前页面需要 HTTPS 才能调用摄像头（或使用 localhost 访问）'
-    } else {
-      scanError.value = '摄像头打开失败：' + msg
-    }
-    scanning.value = false
-  }
-}
-
-const detectBarcode = () => {
-  if (!scanDialogVisible.value || !scanning.value) return
-  if (!barcodeDetector || !videoEl.value) {
-    detectTimer = setTimeout(detectBarcode, 300)
-    return
-  }
-  barcodeDetector.detect(videoEl.value)
-    .then(codes => {
-      if (codes.length > 0) {
-        const code = codes[0].rawValue
-        closeScanner()
-        form.value.asset_code = code
+    const status = await BarcodeScanner.checkPermission({ force: true })
+    if (status.granted) {
+      const result = await BarcodeScanner.startScan()
+      if (result && result.hasContent && result.content) {
+        form.value.asset_code = result.content
         onAssetBlur()
-        ElMessage.success('扫码成功：' + code)
-      } else {
-        detectTimer = setTimeout(detectBarcode, 200)
+        ElMessage.success('扫码成功：' + result.content)
       }
-    })
-    .catch(err => {
-      console.warn('detect error:', err)
-      detectTimer = setTimeout(detectBarcode, 300)
-    })
-}
-
-const onDialogClose = () => {
-  closeScanner()
-}
-
-const closeScanner = () => {
-  scanning.value = false
-  if (detectTimer) { clearTimeout(detectTimer); detectTimer = null }
-  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null }
-  scanDialogVisible.value = false
+    } else if (status.denied) {
+      ElMessage.warning('摄像头权限被拒绝，请在系统设置中开启摄像头权限')
+    } else {
+      ElMessage.warning('无法获取摄像头权限')
+    }
+  } catch (e) {
+    console.error('scan error:', e)
+    ElMessage.error('扫码失败：' + (e.message || String(e)))
+  }
 }
 
 const onAssetBlur = async () => {
