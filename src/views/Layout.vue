@@ -51,6 +51,9 @@
         <el-menu-item index="/purchase-requests">
           <el-icon><ShoppingCart /></el-icon><span>资产采购</span>
         </el-menu-item>
+        <el-menu-item index="/sync-app">
+          <el-icon><RefreshRight /></el-icon><span>同步APP</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 

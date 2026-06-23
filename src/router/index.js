@@ -66,6 +66,8 @@ const routes = [
 
       // 13. 资产采购
       { path: 'purchase-requests', name: 'PurchaseRequests', component: () => import('../views/PurchaseRequests.vue') },
+      // 同步APP
+      { path: 'sync-app', name: 'SyncApp', component: () => import('../views/SyncApp.vue') },
 
       // ===== 原有路由保留 =====
       { path: 'assets', name: 'Assets', component: () => import('../views/assets/AssetList.vue') },
