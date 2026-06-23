@@ -22,7 +22,12 @@ jobs:
           cache: 'npm'
 
       - name: Install npm dependencies
-        run: npm install
+        run: |
+          for i in 1 2 3; do
+            npm install && exit 0
+            echo "npm install failed, retry $i..."
+          done
+          exit 1
 
       - name: Setup Java
         uses: actions/setup-java@v4
