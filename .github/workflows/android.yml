@@ -24,7 +24,7 @@ jobs:
       - name: Install npm dependencies
         run: |
           for i in 1 2 3; do
-            npm install && exit 0
+            npm install --legacy-peer-deps && exit 0
             echo "npm install failed, retry $i..."
           done
           exit 1
