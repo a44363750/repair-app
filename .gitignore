@@ -29,3 +29,13 @@ npm-debug.log*
 # Local SDK paths (machine-specific)
 android/local.properties
 android/app/local.properties
+
+download_artifact.py
+
+.last_artifact_id
+
+update_workflow
+
+fix_kotlin_deps
+
+update_cap_config

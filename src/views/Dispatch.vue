@@ -48,7 +48,7 @@
         <el-form-item label="故障描述"><el-input v-model="dispatchForm.fault_description" type="textarea" disabled /></el-form-item>
         <el-form-item label="选择人员">
           <el-select v-model="dispatchForm.staff_id" placeholder="请选择维修人员" style="width:100%">
-            <el-option v-for="s in availableStaff" :key="s.id" :label="s.name" :value="s.id" />
+            <el-option v-for="s in availableStaff" :key="s.id" :label="s.employee_name || s.name || ('员工' + s.id)" :value="s.id" />
           </el-select>
         </el-form-item>
       </el-form>

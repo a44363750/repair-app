@@ -48,8 +48,8 @@ const fetchData = async () => {
   loading.value = true
   try {
     const res = await dispatcherApi.list( { page: page.value, page_size: pageSize.value })
-    tableData.value = res.data.data || res.data
-    total.value = res.data.total || 0
+    tableData.value = Array.isArray(res.data) ? res.data : (res.data?.data || [])
+    total.value = Array.isArray(res.data) ? res.data.length : (res.data?.total || 0)
   } finally { loading.value = false }
 }
 const showDialog = () => { form.value = { employee_id: null }; dialogVisible.value = true }

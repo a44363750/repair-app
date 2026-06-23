@@ -84,8 +84,8 @@ const formRef = ref()
 const loadData = async () => {
   loading.value = true
   try {
-    tableData.value = await employeeApi.list()
-    departments.value = await departmentApi.list()
+    const r=await employeeApi.list(); tableData.value=Array.isArray(r.data)?r.data:(r.data?.data||r.data||[])
+    const d=await departmentApi.list(); departments.value=Array.isArray(d.data)?d.data:(d.data?.data||d.data||[])
   } finally {
     loading.value = false
   }

@@ -61,13 +61,13 @@ const fetchData = async () => {
 }
 const showDialog = (mode, row = {}) => {
   dialogTitle.value = mode === 'add' ? '新增维修人员' : '编辑维修人员'
-  form.value = mode === 'add' ? { employee_id: null, name: '', specialty: '', phone: '', is_active: true }
-    : { id: row.id, employee_id: row.employee_id, name: row.employee_name || '', specialty: row.specialty || '', phone: row.phone || '', is_active: row.is_active }
+  form.value = mode === 'add' ? { employee_id: null, role: 'technician', specialty: '', phone: '' }
+    : { id: row.id, employee_id: row.employee_id, role: row.role || 'technician', specialty: row.specialty || '', phone: row.phone || '' }
   dialogVisible.value = true
 }
 const handleSave = async () => {
-  if (form.value.id) await axios.put(`/api/maintenance-staff/${form.value.id}`, form.value)
-  else await maintenanceStaffApi.create( form.value)
+  if (form.value.id) await maintenanceStaffApi.update(form.value.id, { employee_id: form.value.employee_id, specialty: form.value.specialty, phone: form.value.phone, role: form.value.role || 'technician' })
+  else await maintenanceStaffApi.create({ employee_id: form.value.employee_id, specialty: form.value.specialty, phone: form.value.phone, role: form.value.role || 'technician' })
   dialogVisible.value = false; fetchData(); ElMessage.success('保存成功')
 }
 const handleDelete = async (id) => {

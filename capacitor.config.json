@@ -1,6 +1,6 @@
 {
   "appId": "com.wh.repair",
-  "appName": "物业维修管理",
+  "appName": "设备报修及点检管理",
   "webDir": "dist",
   "server": {
     "url": "http://10.50.3.81",
