@@ -70,13 +70,16 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: Rename APK to final name
+      - name: Rename APK with timestamp
+        id: rename
         run: |
-          cp android/app/build/outputs/apk/debug/app-debug.apk "android/app/build/outputs/apk/debug/设备报修及点检管理.apk"
+          APK_NAME="设备报修及点检管理_$(date +%Y%m%d_%H%M%S).apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "android/app/build/outputs/apk/debug/${APK_NAME}"
+          echo "APK_NAME=${APK_NAME}" >> $GITHUB_OUTPUT
 
       - name: Upload APK as artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
-          path: android/app/build/outputs/apk/debug/设备报修及点检管理.apk
+          path: android/app/build/outputs/apk/debug/${{ steps.rename.outputs.APK_NAME }}
           retention-days: 5
