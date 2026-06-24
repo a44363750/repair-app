@@ -56,7 +56,7 @@
 import { ref, watch, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
-// 使用原生摄像头 + jsQR（无html5-qrcode依赖）
+// 使用原生摄像头 + jsQR（无需外部扫码库）
 import { repairApi } from '../api'
 
 const route = useRoute()
