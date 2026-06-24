@@ -104,10 +104,7 @@
           <button class="close-btn" @click="closeScanner">✕</button>
         </div>
         <div class="scanner-body">
-          <video ref="videoEl" class="scanner-video" autoplay playsinline></video>
-          <div class="scanner-overlay">
-            <div class="scan-frame"></div>
-          </div>
+          <div id="qr-reader" class="qr-reader"></div>
           <p class="scanner-tip">将二维码放入框内，自动扫描</p>
         </div>
         <div class="scanner-footer">
@@ -139,10 +136,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
+import { Html5Qrcode } from 'html5-qrcode'
 
 const route = useRoute()
 
@@ -164,11 +162,9 @@ const completionRate = computed(() => {
 // 扫码
 const scanning = ref(false)
 const showScanner = ref(false)
-const videoEl = ref(null)
 const manualCode = ref('')
 const submitting = ref(false)
-let mediaStream = null
-let barcodeDetector = null
+let html5Qr = null
 
 // Toast
 const toast = reactive({ show: false, type: 'success', title: '', msg: '' })
@@ -223,7 +219,7 @@ const loadTask = async () => {
   }
 }
 
-// ========== 扫码 ==========
+// ========== 扫码（使用 html5-qrcode）==========
 const openScanner = async () => {
   if (scanning.value) return
   showScanner.value = true
@@ -232,45 +228,38 @@ const openScanner = async () => {
   await nextTick()
 
   try {
-    // 尝试使用 Barcode Detection API
-    if ('BarcodeDetector' in window) {
-      barcodeDetector = new BarcodeDetector({ formats: ['qr_code', 'code_128', 'code_39'] })
+    // 关闭之前的实例
+    if (html5Qr) {
+      try { await html5Qr.stop(); } catch (_) {}
+      html5Qr = null
     }
 
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment' }
-    })
+    html5Qr = new Html5Qrcode('qr-reader')
 
-    videoEl.value.srcObject = mediaStream
+    await html5Qr.start(
+      { facingMode: 'environment' },
+      {
+        fps: 10,
+        qrbox: { width: 240, height: 240 },
+        useBarCodeDetectorIfSupported: false
+      },
+      (decodedText) => {
+        // 扫码成功
+        html5Qr.stop().catch(() => {})
+        handleScanResult(decodedText.trim())
+      },
+      () => {
+        // 扫码失败（无二维码），忽略继续扫描
+      }
+    )
+
     scanning.value = true
-
-    if (barcodeDetector) {
-      detectBarcode()
-    } else {
-      ElMessage.warning('您的浏览器不支持自动扫码，请手动输入资产编号')
-    }
   } catch (e) {
     console.error('Camera error:', e)
     ElMessage.error('无法访问相机，请检查权限设置或使用手动输入')
     showScanner.value = false
+    scanning.value = false
   }
-}
-
-const detectBarcode = () => {
-  if (!barcodeDetector || !scanning.value) return
-
-  barcodeDetector.detect(videoEl.value)
-    .then(barcodes => {
-      if (barcodes.length > 0) {
-        const code = barcodes[0].rawValue
-        handleScanResult(code)
-      } else {
-        setTimeout(detectBarcode, 200)
-      }
-    })
-    .catch(() => {
-      setTimeout(detectBarcode, 300)
-    })
 }
 
 const handleScanResult = async (assetCode) => {
@@ -338,16 +327,16 @@ const doCheck = async (assetCode) => {
   }
 }
 
-const stopCamera = () => {
-  if (mediaStream) {
-    mediaStream.getTracks().forEach(t => t.stop())
-    mediaStream = null
+const stopCamera = async () => {
+  if (html5Qr) {
+    try { await html5Qr.stop(); } catch (_) {}
+    html5Qr = null
   }
   scanning.value = false
 }
 
-const closeScanner = () => {
-  stopCamera()
+const closeScanner = async () => {
+  await stopCamera()
   showScanner.value = false
 }
 
@@ -367,8 +356,8 @@ const formatTime = (iso) => {
 }
 
 // ========== 清理 ==========
-onUnmounted(() => {
-  stopCamera()
+onUnmounted(async () => {
+  await stopCamera()
 })
 
 onMounted(() => {
@@ -665,35 +654,21 @@ onMounted(() => {
   justify-content: center;
 }
 
-.scanner-video {
+.qr-reader {
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: 400px;
 }
 
-.scanner-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-
-.scan-frame {
-  width: 240px;
-  height: 240px;
-  border: 3px solid rgba(64, 158, 255, 0.8);
-  border-radius: 16px;
-  box-shadow: 0 0 0 4000px rgba(0,0,0,0.5);
+.qr-reader video {
+  width: 100% !important;
+  border-radius: 8px;
 }
 
 .scanner-tip {
-  position: absolute;
-  bottom: 120px;
   color: #fff;
   font-size: 14px;
   text-align: center;
+  padding: 12px 0;
   text-shadow: 0 1px 3px rgba(0,0,0,0.8);
 }
 
