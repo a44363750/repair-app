@@ -91,7 +91,7 @@ const startScanner = async () => {
     html5Qr = new Html5Qrcode('qr-reader')
     await html5Qr.start(
       { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: 280, height: 150 } },
+      { fps: 10, qrbox: { width: 280, height: 150 }, useBarCodeDetectorIfSupported: false },
       (decodedText) => {
         form.value.asset_code = decodedText.trim()
         ElMessage.success('扫码成功：' + decodedText)
