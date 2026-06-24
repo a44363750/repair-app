@@ -5,7 +5,7 @@
       <el-form :model="form" :rules="rules" ref="formRef" label-width="100px" style="max-width:600px">
         <el-form-item label="资产编号" prop="asset_code">
           <el-input v-model="form.asset_code" placeholder="请扫描或输入资产编号" @blur="onAssetBlur" style="width:320px" />
-          <el-button type="primary" @click="openScanner" style="margin-left:8px">📷 扫码</el-button>
+          <el-button type="primary" @click="showScanner = true" style="margin-left:8px">📷 扫码</el-button>
         </el-form-item>
         <el-form-item label="资产名称" prop="asset_name">
           <el-input v-model="form.asset_name" placeholder="自动填充" disabled />
@@ -38,20 +38,34 @@
         </el-form-item>
       </el-form>
     </el-card>
+
+    <!-- QR scanner dialog -->
+    <el-dialog v-model="showScanner" title="扫码资产编号" width="500px" :close-on-click-modal="false">
+      <div v-if="scannerActive" id="qr-reader" style="width:100%;min-height:300px"></div>
+      <div v-else style="text-align:center;padding:40px 0;color:#909399">
+        <p>正在初始化摄像头...</p>
+      </div>
+      <template #footer>
+        <el-button @click="stopScanner">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
-import { BarcodeScanner } from '@capacitor-community/barcode-scanner'
+import { Html5Qrcode } from 'html5-qrcode'
 import { repairApi } from '../api'
 
 const route = useRoute()
 const formRef = ref()
 const submitting = ref(false)
 const assetInfo = ref(null)
+const showScanner = ref(false)
+const scannerActive = ref(false)
+let html5Qr = null
 
 const form = ref({
   asset_code: '', asset_name: '', fault_location: '', fault_description: '',
@@ -64,57 +78,50 @@ const rules = {
   contact_phone: [{ required: true, message: '请输入电话', trigger: 'blur' }]
 }
 
-// 扫码入口
-const openScanner = async () => {
+watch(showScanner, async (val) => {
+  if (val) {
+    await startScanner()
+  } else {
+    await stopScanner()
+  }
+})
+
+const startScanner = async () => {
   try {
-    // 1. 检查摄像头权限
-    const status = await BarcodeScanner.checkPermission({ force: true })
-    if (!status.granted) {
-      if (status.denied) {
-        ElMessage.warning('摄像头权限被拒绝，请在系统设置中开启后重试')
-      } else {
-        ElMessage.warning('无法获取摄像头权限')
-      }
-      return
-    }
-
-    // 2. 停止一切可能的后台摄像头活动（防止重复）
-    try { await BarcodeScanner.stopScan() } catch (_) {}
-
-    // 3. 开始扫描
-    const result = await BarcodeScanner.startScan()
-
-    // 4. 解析结果
-    if (result) {
-      // hasContent 为 true 表示扫到了码，但 content 可能为 null
-      if (result.hasContent && result.content != null && result.content !== '') {
-        const code = (result.content || '').trim()
-        form.value.asset_code = code
-        ElMessage.success('扫码成功：' + code)
-        await onAssetBlur()
-      } else {
-        // 扫到了但解析为 null（条码/二维码内容为空或格式无法识别）
-        ElMessage.warning('无法解析二维码内容，请确保二维码清晰且包含文字/数字')
-      }
-    } else {
-      // 用户取消或无结果
-      ElMessage.info('未扫描到二维码')
-    }
+    html5Qr = new Html5Qrcode('qr-reader')
+    await html5Qr.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 280, height: 150 } },
+      (decodedText) => {
+        form.value.asset_code = decodedText.trim()
+        ElMessage.success('扫码成功：' + decodedText)
+        showScanner.value = false
+        stopScanner()
+        onAssetBlur()
+      },
+      () => {}
+    )
+    scannerActive.value = true
   } catch (e) {
-    console.error('scan error:', e)
+    console.error('scanner error:', e)
     const msg = e?.message || String(e)
-    if (msg.includes('cancel') || msg.includes('CANCEL')) {
-      ElMessage.info('扫码已取消')
-    } else if (msg.includes('PERMISSION') || msg.includes('permission')) {
-      ElMessage.warning('摄像头权限不足，请授权后重试')
-    } else if (msg.includes('activity') || msg.includes('Activity')) {
-      ElMessage.error('扫码失败：APP活动窗口异常，请重启APP后重试')
+    if (msg.includes('permission') || msg.includes('NotAllowed')) {
+      ElMessage.warning('摄像头权限被拒绝，请在系统设置中授权后重试')
+    } else if (msg.includes('no camera')) {
+      ElMessage.warning('未找到可用摄像头')
     } else {
       ElMessage.error('扫码失败：' + msg)
     }
-  } finally {
-    // 确保关闭摄像头
-    try { await BarcodeScanner.stopScan() } catch (_) {}
+    showScanner.value = false
+    scannerActive.value = false
+  }
+}
+
+const stopScanner = async () => {
+  scannerActive.value = false
+  if (html5Qr) {
+    try { await html5Qr.stop() } catch (_) {}
+    html5Qr = null
   }
 }
 
@@ -160,19 +167,13 @@ const handleSubmit = async () => {
 
 const resetForm = () => { formRef.value?.resetFields(); assetInfo.value = null }
 
-// 页面销毁时确保摄像头关闭
-onUnmounted(() => {
-  BarcodeScanner.stopScan().catch(() => {})
-})
+onUnmounted(() => { stopScanner() })
 
-onMounted(() => {
-  if (route.query.code) {
-    form.value.asset_code = route.query.code
-    onAssetBlur()
-  }
-})
+if (route.query.code) {
+  form.value.asset_code = route.query.code
+  onAssetBlur()
+}
 </script>
-
 
 <style scoped>
 .report-container { padding: 20px; max-width: 800px; margin: 0 auto; }
