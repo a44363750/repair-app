@@ -58,12 +58,6 @@
       <p class="scanner-hint">将二维码放入框内即可自动识别</p>
     </div>
   </div>
-<div v-if="scannerActive" id="qr-reader" style="width:100%;min-height:300px"></div>
-      <div v-else style="text-align:center;padding:40px 0;color:#909399">
-        <p>正在初始化摄像头...</p>
-      </div>
-      <template #footer>
-        <el-button @click="stopScanner">关闭</el-button>
       </template>
     </el-dialog>
   </div>
