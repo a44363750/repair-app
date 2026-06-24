@@ -39,25 +39,14 @@
       </el-form>
     </el-card>
 
-      <!-- QR scanner: native camera + jsQR -->
-  <div v-if="showScanner" class="scanner-overlay">
-    <div class="scanner-header">
-      <span>扫二维码</span>
-      <button class="close-btn" @click="stopScanner">✕</button>
-    </div>
-    <div class="scanner-body">
-      <div class="scanner-video-wrap">
-        <video id="qr-video" autoplay playsinline muted style="width:100%;border-radius:8px;background:#000;max-height:70vh;object-fit:contain;"></video>
-        <div class="scan-region">
-          <div class="corner tl"></div>
-          <div class="corner tr"></div>
-          <div class="corner bl"></div>
-          <div class="corner br"></div>
-        </div>
+    <!-- QR scanner dialog -->
+    <el-dialog v-model="showScanner" title="扫码资产编号" width="500px" :close-on-click-modal="false">
+      <div v-if="scannerActive" id="qr-reader" style="width:100%;min-height:300px"></div>
+      <div v-else style="text-align:center;padding:40px 0;color:#909399">
+        <p>正在初始化摄像头...</p>
       </div>
-      <p class="scanner-hint">将二维码放入框内即可自动识别</p>
-    </div>
-  </div>
+      <template #footer>
+        <el-button @click="stopScanner">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -67,7 +56,7 @@
 import { ref, watch, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
-// Native camera + jsQR (no html5-qrcode)
+// 使用原生摄像头 + jsQR（无html5-qrcode依赖）
 import { repairApi } from '../api'
 
 const route = useRoute()
@@ -100,29 +89,33 @@ watch(showScanner, async (val) => {
 
 const startScanner = async () => {
   try {
-    // Block any Capacitor BarcodeDetector to prevent plugin bridge errors
-    // This must be set BEFORE any camera/scanner initialization
-    Object.defineProperty(window, 'BarcodeDetector', {
-      get: () => ({ detect: () => Promise.resolve([]), getSupportedFormats: () => Promise.resolve([]) }),
-      configurable: true
-    })
-    
+    // 阻止任何 BarcodeDetector 调用（防止 Capacitor 插件桥接报错）
+    // 如果 Capacitor webview 注入了 BarcodeDetector，用空实现覆盖
+    if (window.BarcodeDetector && !window.BarcodeDetector._fake) {
+      const origDetect = window.BarcodeDetector.prototype?.detect
+      const origFormats = window.BarcodeDetector.getSupportedFormats
+      window.BarcodeDetector.prototype.detect = () => Promise.resolve([])
+      if (origDetect) window.BarcodeDetector.prototype.detect = origDetect
+      if (origFormats) window.BarcodeDetector.getSupportedFormats = origFormats
+      window.BarcodeDetector._fake = true
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
       audio: false
     })
     videoStream = stream
-    const video = document.getElementById('qr-video')
+
+    const video = document.getElementById('qr-reader')
     if (!video) { throw new Error('Video element not found') }
     video.srcObject = stream
     await video.play()
-    showScanner.value = true
     scannerActive.value = true
 
     const canvas = document.createElement('canvas')
     const ctx = canvas.getContext('2d')
 
-    const decodeFrame = () => {
+    const decodeLoop = () => {
       if (!videoStream) return
       try {
         const w = video.videoWidth || 640
@@ -141,18 +134,16 @@ const startScanner = async () => {
             return
           }
         }
-      } catch (e) {
-        // Silent: no QR in frame is normal
-      }
-      animationFrameId = requestAnimationFrame(decodeFrame)
+      } catch (_) {}
+      animationFrameId = requestAnimationFrame(decodeLoop)
     }
-    decodeFrame()
+    decodeLoop()
   } catch (e) {
     console.error('camera error:', e)
     const msg = e?.message || String(e)
     if (msg.includes('permission') || msg.includes('NotAllowed') || msg.includes('denied')) {
       ElMessage.warning('摄像头权限被拒绝，请在系统设置中授权后重试')
-    } else if (msg.includes('not found') || msg.includes('Unable to claim')) {
+    } else if (msg.includes('not found') || msg.includes('Unable')) {
       ElMessage.warning('未找到可用摄像头')
     } else {
       ElMessage.error('摄像头打开失败：' + msg)
@@ -163,7 +154,6 @@ const startScanner = async () => {
 }
 
 const stopScanner = async () => {
-  showScanner.value = false
   scannerActive.value = false
   if (animationFrameId) {
     cancelAnimationFrame(animationFrameId)
