@@ -104,7 +104,7 @@
           <button class="close-btn" @click="closeScanner">✕</button>
         </div>
         <div class="scanner-body">
-          <div id="qr-reader" class="qr-reader"></div>
+          <video id="qr-reader" class="qr-reader" autoplay playsinline muted></video>
           <p class="scanner-tip">将二维码放入框内，自动扫描</p>
         </div>
         <div class="scanner-footer">
@@ -140,7 +140,6 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
-import { Html5Qrcode } from 'html5-qrcode'
 
 const route = useRoute()
 
@@ -164,7 +163,6 @@ const scanning = ref(false)
 const showScanner = ref(false)
 const manualCode = ref('')
 const submitting = ref(false)
-let html5Qr = null
 
 // Toast
 const toast = reactive({ show: false, type: 'success', title: '', msg: '' })
@@ -219,7 +217,12 @@ const loadTask = async () => {
   }
 }
 
-// ========== 扫码（使用 html5-qrcode）==========
+// ========== 扫码（原生 getUserMedia + jsQR）==========
+let videoStream = null
+let scanRafId = null
+let scanCanvas = null
+let scanCtx = null
+
 const openScanner = async () => {
   if (scanning.value) return
   showScanner.value = true
@@ -228,37 +231,49 @@ const openScanner = async () => {
   await nextTick()
 
   try {
-    // 关闭之前的实例
-    if (html5Qr) {
-      try { await html5Qr.stop(); } catch (_) {}
-      html5Qr = null
-    }
+    // 关闭之前的
+    await stopCamera()
 
-    html5Qr = new Html5Qrcode('qr-reader')
+    videoStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: 640, height: 480 }
+    })
 
-    await html5Qr.start(
-      { facingMode: 'environment' },
-      {
-        fps: 10,
-        qrbox: { width: 240, height: 240 },
-        useBarCodeDetectorIfSupported: false
-      },
-      (decodedText) => {
-        // 扫码成功
-        html5Qr.stop().catch(() => {})
-        handleScanResult(decodedText.trim())
-      },
-      () => {
-        // 扫码失败（无二维码），忽略继续扫描
-      }
-    )
+    const video = document.getElementById('qr-reader')
+    video.srcObject = videoStream
+    await video.play()
+
+    scanCanvas = document.createElement('canvas')
+    scanCanvas.width = 640
+    scanCanvas.height = 480
+    scanCtx = scanCanvas.getContext('2d')
 
     scanning.value = true
+    scanNextFrame()
   } catch (e) {
     console.error('Camera error:', e)
     ElMessage.error('无法访问相机，请检查权限设置或使用手动输入')
     showScanner.value = false
     scanning.value = false
+  }
+}
+
+const scanNextFrame = () => {
+  if (!scanning.value) return
+  try {
+    const video = document.getElementById('qr-reader')
+    if (video.readyState >= 2) {
+      scanCtx.drawImage(video, 0, 0, scanCanvas.width, scanCanvas.height)
+      const imageData = scanCtx.getImageData(0, 0, scanCanvas.width, scanCanvas.height)
+      const code = window.jsQR ? window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' }) : null
+      if (code && code.data) {
+        // 扫码成功
+        handleScanResult(code.data.trim())
+        return
+      }
+    }
+    scanRafId = requestAnimationFrame(scanNextFrame)
+  } catch (e) {
+    scanRafId = requestAnimationFrame(scanNextFrame)
   }
 }
 
@@ -328,11 +343,19 @@ const doCheck = async (assetCode) => {
 }
 
 const stopCamera = async () => {
-  if (html5Qr) {
-    try { await html5Qr.stop(); } catch (_) {}
-    html5Qr = null
-  }
   scanning.value = false
+  if (scanRafId) {
+    cancelAnimationFrame(scanRafId)
+    scanRafId = null
+  }
+  if (videoStream) {
+    videoStream.getTracks().forEach(t => t.stop())
+    videoStream = null
+  }
+  const video = document.getElementById('qr-reader')
+  if (video) {
+    video.srcObject = null
+  }
 }
 
 const closeScanner = async () => {
