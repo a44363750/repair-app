@@ -91,7 +91,10 @@ const openScanner = async () => {
   showScanner.value = true
 
   try {
-    // 尝试 Capacitor 原生方式获取摄像头
+    // Capacitor Android WebView 可能没有 navigator.mediaDevices，先检测
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('mediaDevices not available')
+    }
     mediaStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment' }
     })
@@ -101,7 +104,7 @@ const openScanner = async () => {
       scanLoop()
     }
   } catch (e) {
-    // Capacitor WebView 没有 getUserMedia，加载 Camera 插件 polyfill
+    // 没有 getUserMedia，尝试 Capacitor Camera 插件拍照扫码
     console.warn('getUserMedia not available, trying Camera polyfill:', e)
     try {
       const { Camera } = window.Capacitor.Plugins
