@@ -1,52 +1,75 @@
 <template>
   <div class="sync-container">
     <h2>同步APP</h2>
-    <el-alert v-if="buildInfo" :type="alertType" :title="statusText" show-icon style="margin-bottom:20px" />
+    <el-alert v-if="latestBuild" :type="alertType" :title="statusText" show-icon style="margin-bottom:20px" />
 
     <el-space direction="vertical" :size="20" style="width:100%">
+
+      <!-- 构建操作 -->
       <el-card shadow="hover">
         <template #header>
-          <span>手动同步APP</span>
+          <span>构建与同步</span>
         </template>
         <p style="color:#666;margin-bottom:16px">
-          点击下方按钮，将最新代码构建为 Android 安装包（APK）。<br/>
-          构建完成后，APK 自动部署到下载服务器（约需 5~8 分钟）。
+          <strong>触发构建：</strong>将最新代码提交到 GitHub CI，构建 Android 安装包（约需 5~8 分钟）。<br/>
+          <strong>手动同步APP：</strong>CI 构建完成后，将最新 APK 部署到下载服务器。
         </p>
         <el-button type="primary" size="large" :loading="triggering" @click="triggerBuild">
           触发构建
         </el-button>
+        <el-button type="success" size="large" :loading="syncing" @click="syncApk">
+          手动同步APP
+        </el-button>
         <el-button size="large" @click="refresh">刷新状态</el-button>
       </el-card>
 
+      <!-- 版本历史 -->
       <el-card shadow="hover">
         <template #header>
-          <span>最近构建记录</span>
+          <span>版本历史</span>
         </template>
-        <p v-if="!buildInfo" style="color:#999">点击「刷新状态」查看</p>
-        <el-descriptions v-else :column="2" border>
-          <el-descriptions-item label="状态">{{ buildInfo.status === 'completed' ? (buildInfo.conclusion === 'success' ? '构建成功' : '构建失败') : '进行中' }}</el-descriptions-item>
-          <el-descriptions-item label="Commit">{{ buildInfo.head_sha }}</el-descriptions-item>
-          <el-descriptions-item label="触发时间">{{ buildInfo.created_at }}</el-descriptions-item>
-          <el-descriptions-item label="操作">
-            <a :href="buildInfo.html_url" target="_blank" style="color:#409eff">在 GitHub 查看</a>
-          </el-descriptions-item>
-        </el-descriptions>
+        <p v-if="!versions.length" style="color:#999">暂无版本记录</p>
+        <el-table v-else :data="versions" stripe style="width:100%">
+          <el-table-column label="版本" width="120">
+            <template #default="{row}">
+              <el-tag :type="row.isCurrent ? 'success' : 'info'" size="small">
+                {{ row.isCurrent ? '✓ ' : '' }}v{{ row.buildNumber }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="commit" label="Commit" width="90">
+            <template #default="{row}">
+              <code>{{ row.commit }}</code>
+            </template>
+          </el-table-column>
+          <el-table-column prop="buildTime" label="构建时间" width="160" />
+          <el-table-column prop="apkSize" label="大小" width="100" />
+          <el-table-column label="构建结果" width="100">
+            <template #default="{row}">
+              <el-tag :type="row.conclusion === 'success' ? 'success' : 'danger'" size="small">
+                {{ row.conclusion === 'success' ? '成功' : '失败' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作">
+            <template #default="{row}">
+              <el-button
+                v-if="row.conclusion === 'success'"
+                type="primary"
+                size="small"
+                :loading="downloadingRunId === row.runId"
+                @click="downloadVersion(row)"
+              >
+                下载此版本
+              </el-button>
+              <el-link v-if="row.htmlUrl" :href="row.htmlUrl" target="_blank" style="margin-left:8px" type="info" :icon="Link">
+                CI 日志
+              </el-link>
+            </template>
+          </el-table-column>
+        </el-table>
       </el-card>
 
-      <el-card shadow="hover">
-        <template #header>
-          <span>APK 下载</span>
-        </template>
-        <p style="color:#666;margin-bottom:12px">构建完成后，使用以下地址下载安装：</p>
-        <el-input :value="apkUrl" readonly style="margin-bottom:12px">
-          <template #append>
-            <el-button @click="copyUrl">复制</el-button>
-          </template>
-        </el-input>
-        <el-link type="success" :href="apkUrl" target="_blank" :underline="false">
-          <el-icon><Download /></el-icon> 下载安装包
-        </el-link>
-      </el-card>
     </el-space>
   </div>
 </template>
@@ -54,22 +77,26 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Download } from '@element-plus/icons-vue'
+import { Link } from '@element-plus/icons-vue'
 
 const triggering = ref(false)
-const buildInfo = ref(null)
-const apkUrl = 'http://10.50.3.81/apk/设备报修及点检管理.apk'
+const syncing = ref(false)
+const downloadingRunId = ref(null)
+const latestBuild = ref(null)
+const versions = ref([])
 
 const alertType = computed(() => {
-  if (!buildInfo.value) return 'info'
-  if (buildInfo.value.status === 'completed' && buildInfo.value.conclusion === 'success') return 'success'
+  if (!latestBuild.value) return 'info'
+  if (latestBuild.value.status === 'completed' && latestBuild.value.conclusion === 'success') return 'success'
   return 'warning'
 })
 
 const statusText = computed(() => {
-  if (!buildInfo.value) return '未知'
-  if (buildInfo.value.status === 'completed') {
-    return buildInfo.value.conclusion === 'success' ? '最近构建：成功' : '最近构建：失败'
+  if (!latestBuild.value) return '未知'
+  if (latestBuild.value.status === 'completed') {
+    return latestBuild.value.conclusion === 'success'
+      ? `最近构建：成功（Build {{ latestBuild.value.buildNumber }}）`
+      : '最近构建：失败'
   }
   return '构建进行中...'
 })
@@ -89,19 +116,47 @@ const triggerBuild = async () => {
   }
 }
 
-const refresh = async () => {
+const syncApk = async () => {
+  syncing.value = true
   try {
-    const res = await fetch('/api/sync')
+    const res = await fetch('/api/sync/download', { method: 'POST' })
     const data = await res.json()
-    buildInfo.value = data
+    if (!res.ok) throw new Error(data.detail || '同步失败')
+    ElMessage.success(data.message || 'APK 已同步到服务器')
+    setTimeout(refresh, 2000)
   } catch (e) {
-    ElMessage.error('获取状态失败: ' + e.message)
+    ElMessage.error(e.message)
+  } finally {
+    syncing.value = false
   }
 }
 
-const copyUrl = () => {
-  navigator.clipboard.writeText(apkUrl)
-  ElMessage.success('链接已复制')
+const downloadVersion = async (row) => {
+  downloadingRunId.value = row.runId
+  try {
+    const res = await fetch('/api/sync/download?run_id=' + row.runId, { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.detail || '下载失败')
+    ElMessage.success('已下载并部署 v' + row.buildNumber)
+    setTimeout(refresh, 2000)
+  } catch (e) {
+    ElMessage.error(e.message)
+  } finally {
+    downloadingRunId.value = null
+  }
+}
+
+const refresh = async () => {
+  try {
+    const res = await fetch('/api/sync/versions')
+    if (res.ok) {
+      const data = await res.json()
+      versions.value = data.versions || []
+      latestBuild.value = versions.value.find(v => v.isCurrent) || versions.value[0] || null
+    }
+  } catch (e) {
+    ElMessage.error('获取版本列表失败: ' + e.message)
+  }
 }
 
 onMounted(refresh)
