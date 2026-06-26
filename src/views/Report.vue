@@ -5,7 +5,7 @@
       <el-form :model="form" :rules="rules" ref="formRef" label-width="100px" style="max-width:600px">
         <el-form-item label="资产编号" prop="asset_code">
           <el-input v-model="form.asset_code" placeholder="请扫描或输入资产编号" @blur="onAssetBlur" style="width:320px" />
-          <el-button type="primary" @click="showScanner = true" style="margin-left:8px">📷 扫码</el-button>
+          <el-button type="primary" @click="openScanner" style="margin-left:8px">📷 扫码</el-button>
         </el-form-item>
         <el-form-item label="资产名称" prop="asset_name">
           <el-input v-model="form.asset_name" placeholder="自动填充" disabled />
@@ -39,34 +39,41 @@
       </el-form>
     </el-card>
 
-    <!-- QR scanner dialog -->
-    <el-dialog v-model="showScanner" title="扫码资产编号" width="500px" :close-on-click-modal="false">
-      <div v-if="scannerActive" id="qr-reader" style="width:100%;min-height:300px"></div>
-      <div v-else style="text-align:center;padding:40px 0;color:#909399">
-        <p>正在初始化摄像头...</p>
+    <!-- 扫码全屏弹窗 -->
+    <div v-if="showScanner" class="scanner-modal" @click.self="closeScanner">
+      <div class="scanner-header">
+        <span>📷 扫码</span>
+        <button class="close-btn" @click="closeScanner">✕</button>
       </div>
-      <template #footer>
-        <el-button @click="stopScanner">关闭</el-button>
-      </template>
-    </el-dialog>
+      <div class="scanner-body">
+        <video ref="videoEl" class="scanner-video" autoplay playsinline></video>
+        <canvas ref="canvasEl" class="scanner-canvas"></canvas>
+        <div class="scanner-overlay">
+          <div class="scan-frame"></div>
+          <p class="scanner-tip">将二维码放入框内，自动扫描</p>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
-// 使用原生摄像头 + jsQR（无需外部扫码库）
 import { repairApi } from '../api'
 
 const route = useRoute()
 const formRef = ref()
 const submitting = ref(false)
 const assetInfo = ref(null)
+
+// 扫码相关 refs
+const videoEl = ref(null)
+const canvasEl = ref(null)
+let mediaStream = null
+let rafId = null
 const showScanner = ref(false)
-const scannerActive = ref(false)
-let videoStream = null
-let animationFrameId = null
 
 const form = ref({
   asset_code: '', asset_name: '', fault_location: '', fault_description: '',
@@ -79,142 +86,188 @@ const rules = {
   contact_phone: [{ required: true, message: '请输入电话', trigger: 'blur' }]
 }
 
-watch(showScanner, async (val) => {
-  if (val) {
-    await startScanner()
-  } else {
-    await stopScanner()
-  }
-})
+// Capacitor WebView 环境：navigator.mediaDevices 不存在，需要通过插件获取视频流
+const openScanner = async () => {
+  showScanner.value = true
 
-const startScanner = async () => {
   try {
-    // 阻止任何 BarcodeDetector 调用（防止 Capacitor 插件桥接报错）
-    // 如果 Capacitor webview 注入了 BarcodeDetector，用空实现覆盖
-    if (window.BarcodeDetector && !window.BarcodeDetector._fake) {
-      const origDetect = window.BarcodeDetector.prototype?.detect
-      const origFormats = window.BarcodeDetector.getSupportedFormats
-      window.BarcodeDetector.prototype.detect = () => Promise.resolve([])
-      if (origDetect) window.BarcodeDetector.prototype.detect = origDetect
-      if (origFormats) window.BarcodeDetector.getSupportedFormats = origFormats
-      window.BarcodeDetector._fake = true
-    }
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false
+    // 尝试 Capacitor 原生方式获取摄像头
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' }
     })
-    videoStream = stream
-
-    const video = document.getElementById('qr-reader')
-    if (!video) { throw new Error('Video element not found') }
-    video.srcObject = stream
-    await video.play()
-    scannerActive.value = true
-
-    const canvas = document.createElement('canvas')
-    const ctx = canvas.getContext('2d')
-
-    const decodeLoop = () => {
-      if (!videoStream) return
-      try {
-        const w = video.videoWidth || 640
-        const h = video.videoHeight || 480
-        canvas.width = w
-        canvas.height = h
-        ctx.drawImage(video, 0, 0, w, h)
-        const imageData = ctx.getImageData(0, 0, w, h)
-        if (typeof window.jsQR === 'function') {
-          const code = window.jsQR(imageData.data, w, h, { inversionAttempts: 'dontInvert' })
-          if (code && code.data) {
-            form.value.asset_code = code.data.trim()
-            ElMessage.success('扫码成功：' + code.data)
-            stopScanner()
-            onAssetBlur()
-            return
-          }
-        }
-      } catch (_) {}
-      animationFrameId = requestAnimationFrame(decodeLoop)
+    videoEl.value.srcObject = mediaStream
+    videoEl.value.onloadedmetadata = () => {
+      videoEl.value.play()
+      scanLoop()
     }
-    decodeLoop()
   } catch (e) {
-    console.error('camera error:', e)
-    const msg = e?.message || String(e)
-    if (msg.includes('permission') || msg.includes('NotAllowed') || msg.includes('denied')) {
-      ElMessage.warning('摄像头权限被拒绝，请在系统设置中授权后重试')
-    } else if (msg.includes('not found') || msg.includes('Unable')) {
-      ElMessage.warning('未找到可用摄像头')
-    } else {
-      ElMessage.error('摄像头打开失败：' + msg)
+    // Capacitor WebView 没有 getUserMedia，加载 Camera 插件 polyfill
+    console.warn('getUserMedia not available, trying Camera polyfill:', e)
+    try {
+      const { Camera } = window.Capacitor.Plugins
+      if (Camera) {
+        const img = await Camera.getPhoto({
+          quality: 90,
+          allowEditing: false,
+          resultType: 'base64',
+          source: 'CAMERA'
+        })
+        // 将照片绘制到 canvas 并用 jsQR 解析
+        const canvas = canvasEl.value
+        const ctx = canvas.getContext('2d')
+        const imgEl = new Image()
+        imgEl.onload = () => {
+          canvas.width = imgEl.width
+          canvas.height = imgEl.height
+          ctx.drawImage(imgEl, 0, 0)
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          if (window.jsQR) {
+            const code = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' })
+            if (code) {
+              onScanSuccess(code.data)
+            } else {
+              ElMessage.warning('照片中未识别到二维码')
+            }
+          } else {
+            ElMessage.error('jsQR 扫码引擎未加载')
+          }
+          closeScanner()
+        }
+        imgEl.src = `data:image/jpeg;base64,${img.base64StringData}`
+        return
+      }
+    } catch (capError) {
+      console.error('Camera plugin error:', capError)
     }
     showScanner.value = false
-    scannerActive.value = false
+    ElMessage.error('无法打开摄像头：此浏览器不支持或未授权')
   }
 }
 
-const stopScanner = async () => {
-  scannerActive.value = false
-  if (animationFrameId) {
-    cancelAnimationFrame(animationFrameId)
-    animationFrameId = null
-  }
-  if (videoStream) {
-    videoStream.getTracks().forEach(t => t.stop())
-    videoStream = null
-  }
-}
-
-const onAssetBlur = async () => {
-  if (!form.value.asset_code) return
-  try {
-    const token = localStorage.getItem('token') || ''
-    const res = await fetch(`/api/assets/public/code/${form.value.asset_code}`, {
-      headers: { 'Authorization': 'Bearer ' + token }
-    })
-    if (!res.ok) {
-      assetInfo.value = null
-      form.value.asset_name = ''
+const scanLoop = () => {
+  if (!showScanner.value || !videoEl.value || !canvasEl.value) return
+  const video = videoEl.value
+  const canvas = canvasEl.value
+  if (!video.videoWidth) { rafId = requestAnimationFrame(scanLoop); return }
+  canvas.width = video.videoWidth
+  canvas.height = video.videoHeight
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(video, 0, 0)
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  if (window.jsQR) {
+    const code = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' })
+    if (code && code.data) {
+      stopCamera()
+      onScanSuccess(code.data)
       return
     }
-    const data = await res.json()
-    if (data && data.asset_code) {
-      assetInfo.value = data
-      form.value.asset_name = data.asset_name || data.name || ''
+  }
+  rafId = requestAnimationFrame(scanLoop)
+}
+
+const onScanSuccess = (code) => {
+  const trimmed = (code || '').trim()
+  if (!trimmed) {
+    ElMessage.warning('二维码内容为空')
+    return
+  }
+  form.value.asset_code = trimmed
+  ElMessage.success('扫码成功：' + trimmed)
+  onAssetBlur()
+}
+
+const closeScanner = () => {
+  stopCamera()
+  showScanner.value = false
+}
+
+const stopCamera = () => {
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null }
+  if (videoEl.value) { videoEl.value.srcObject = null }
+}
+
+onUnmounted(() => stopCamera())
+
+// 资产查询
+const onAssetBlur = async () => {
+  const code = form.value.asset_code.trim()
+  if (!code) return
+  try {
+    const res = await repairApi.value.publicGetAssetInfo(code)
+    if (res?.data?.data) {
+      assetInfo.value = res.data.data
+      form.value.asset_name = res.data.data.name || code
     } else {
       assetInfo.value = null
-      form.value.asset_name = ''
-      ElMessage.warning('未找到资产编号：' + form.value.asset_code)
     }
-  } catch {
+  } catch (e) {
     assetInfo.value = null
-    form.value.asset_name = ''
   }
 }
 
+onMounted(() => {
+  const code = route.query.code
+  if (code) { form.value.asset_code = String(code); onAssetBlur() }
+})
+
+// 提交
 const handleSubmit = async () => {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
   submitting.value = true
   try {
-    await repairApi.create(form.value)
-    ElMessage.success('报修提交成功！')
+    await repairApi.value.createRepairOrder(form.value)
+    ElMessage.success('报修提交成功')
     resetForm()
   } catch (e) {
-    ElMessage.error('提交失败：' + (e.response?.data?.detail || e.message))
-  } finally { submitting.value = false }
+    ElMessage.error('提交失败：' + (e?.response?.data?.message || e.message))
+  } finally {
+    submitting.value = false
+  }
 }
 
-const resetForm = () => { formRef.value?.resetFields(); assetInfo.value = null }
-
-onUnmounted(() => { stopScanner() })
-
-if (route.query.code) {
-  form.value.asset_code = route.query.code
-  onAssetBlur()
+const resetForm = () => {
+  formRef.value.resetFields()
+  assetInfo.value = null
 }
 </script>
 
 <style scoped>
-.report-container { padding: 20px; max-width: 800px; margin: 0 auto; }
+.scanner-modal {
+  position: fixed; inset: 0;
+  background: #000; z-index: 9999;
+  display: flex; flex-direction: column;
+}
+.scanner-header {
+  background: rgba(0,0,0,0.8); color: #fff;
+  padding: 16px 20px;
+  display: flex; justify-content: space-between; font-size: 16px;
+}
+.scanner-body {
+  flex: 1; position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+.scanner-video { width: 100%; height: 100%; object-fit: cover; }
+.scanner-canvas { display: none; }
+.scanner-overlay {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.scan-frame {
+  width: 240px; height: 240px;
+  border: 3px solid rgba(64,158,255,0.8);
+  border-radius: 16px;
+  box-shadow: 0 0 0 4000px rgba(0,0,0,0.5);
+}
+.scanner-tip {
+  position: absolute; bottom: 80px;
+  color: #fff; font-size: 14px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+.close-btn {
+  background: none; border: none; color: #fff;
+  font-size: 20px; cursor: pointer; padding: 0;
+}
 </style>
