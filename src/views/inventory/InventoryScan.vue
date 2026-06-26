@@ -234,6 +234,7 @@ const openScanner = async () => {
     // 关闭之前的
     await stopCamera()
 
+    if (!navigator.mediaDevices) { throw new Error('mediaDevices not available') }
     videoStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment', width: 640, height: 480 }
     })
