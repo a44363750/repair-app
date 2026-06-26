@@ -92,8 +92,8 @@ const openScanner = async () => {
 
   try {
     // Capacitor Android WebView 可能没有 navigator.mediaDevices，先检测
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error('mediaDevices not available')
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      throw new Error('getUserMedia not available')
     }
     mediaStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment' }
