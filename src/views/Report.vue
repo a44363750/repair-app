@@ -52,6 +52,7 @@
           <div class="scan-frame"></div>
           <p class="scanner-tip">将二维码放入框内，自动扫描</p>
         </div>
+        <button v-if="showCaptureBtn" class="capture-btn" @click="capturePhoto">📸 拍照</button>
       </div>
     </div>
   </div>
@@ -68,12 +69,12 @@ const formRef = ref()
 const submitting = ref(false)
 const assetInfo = ref(null)
 
-// 扫码相关 refs
 const videoEl = ref(null)
 const canvasEl = ref(null)
 let mediaStream = null
 let rafId = null
 const showScanner = ref(false)
+const showCaptureBtn = ref(false)
 
 const form = ref({
   asset_code: '', asset_name: '', fault_location: '', fault_description: '',
@@ -86,65 +87,41 @@ const rules = {
   contact_phone: [{ required: true, message: '请输入电话', trigger: 'blur' }]
 }
 
-// Capacitor WebView 环境：navigator.mediaDevices 不存在，需要通过插件获取视频流
 const openScanner = async () => {
   showScanner.value = true
+  showCaptureBtn.value = false
 
-  try {
-    // Capacitor Android WebView 可能没有 navigator.mediaDevices，先检测
-    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
-      throw new Error('getUserMedia not available')
-    }
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment' }
-    })
-    videoEl.value.srcObject = mediaStream
-    videoEl.value.onloadedmetadata = () => {
-      videoEl.value.play()
-      scanLoop()
-    }
-  } catch (e) {
-    // 没有 getUserMedia，尝试 Capacitor Camera 插件拍照扫码
-    console.warn('getUserMedia not available, trying Camera polyfill:', e)
+  // Method 1: Try native getUserMedia (works on HTTPS or localhost)
+  if (navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
     try {
-      const { Camera } = window.Capacitor.Plugins
-      if (Camera) {
-        const img = await Camera.getPhoto({
-          quality: 90,
-          allowEditing: false,
-          resultType: 'base64',
-          source: 'CAMERA'
-        })
-        // 将照片绘制到 canvas 并用 jsQR 解析
-        const canvas = canvasEl.value
-        const ctx = canvas.getContext('2d')
-        const imgEl = new Image()
-        imgEl.onload = () => {
-          canvas.width = imgEl.width
-          canvas.height = imgEl.height
-          ctx.drawImage(imgEl, 0, 0)
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-          if (window.jsQR) {
-            const code = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' })
-            if (code) {
-              onScanSuccess(code.data)
-            } else {
-              ElMessage.warning('照片中未识别到二维码')
-            }
-          } else {
-            ElMessage.error('jsQR 扫码引擎未加载')
-          }
-          closeScanner()
-        }
-        imgEl.src = `data:image/jpeg;base64,${img.base64StringData}`
-        return
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      mediaStream = stream
+      videoEl.value.srcObject = stream
+      videoEl.value.onloadedmetadata = () => {
+        videoEl.value.play()
+        showCaptureBtn.value = true
+        scanLoop()
       }
-    } catch (capError) {
-      console.error('Camera plugin error:', capError)
+      return
+    } catch (e) {
+      console.warn('getUserMedia failed:', e)
     }
-    showScanner.value = false
-    ElMessage.error('无法打开摄像头：此浏览器不支持或未授权')
   }
+
+  // Method 2: Capacitor Camera plugin (if available)
+  const hasCapacitorCamera = !!(window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Camera)
+  if (hasCapacitorCamera) {
+    try {
+      await captureAndScan()
+      return
+    } catch (e) {
+      console.warn('Capacitor Camera failed:', e)
+    }
+  }
+
+  // Method 3: No camera available
+  showScanner.value = false
+  ElMessage.error('无法打开摄像头，请检查权限或升级APP')
 }
 
 const scanLoop = () => {
@@ -157,42 +134,91 @@ const scanLoop = () => {
   const ctx = canvas.getContext('2d')
   ctx.drawImage(video, 0, 0)
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-  if (window.jsQR) {
-    const code = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' })
-    if (code && code.data) {
-      stopCamera()
-      onScanSuccess(code.data)
-      return
-    }
+  const code = window.jsQR ? window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' }) : null
+  if (code && code.data) {
+    stopCamera()
+    onScanSuccess(code.data)
+    return
   }
   rafId = requestAnimationFrame(scanLoop)
 }
 
+const capturePhoto = async () => {
+  if (!videoEl.value || !videoEl.value.videoWidth) return
+  stopCamera()
+  const canvas = canvasEl.value
+  canvas.width = videoEl.value.videoWidth
+  canvas.height = videoEl.value.videoHeight
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(videoEl.value, 0, 0)
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+  await scanImageData(dataUrl)
+}
+
+const captureAndScan = async () => {
+  const Camera = window.Capacitor.Plugins.Camera
+  try {
+    const perm = await Camera.requestPermission()
+    console.log('Camera permission:', perm)
+  } catch (e) {
+    console.warn('Camera permission request failed:', e)
+  }
+  try {
+    const photo = await Camera.getPhoto({
+      quality: 90,
+      allowEditing: false,
+      resultType: 'base64',
+      source: 'CAMERA'
+    })
+    const dataUrl = 'data:image/jpeg;base64,' + photo.base64StringData
+    await scanImageData(dataUrl)
+  } catch (e) {
+    showScanner.value = false
+    ElMessage.error('拍照失败: ' + (e.message || String(e)))
+  }
+}
+
+const scanImageData = async (dataUrl) => {
+  const canvas = canvasEl.value
+  const ctx = canvas.getContext('2d')
+  const img = new Image()
+  img.onload = () => {
+    canvas.width = img.width
+    canvas.height = img.height
+    ctx.drawImage(img, 0, 0)
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const code = window.jsQR ? window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' }) : null
+    if (code && code.data) {
+      showScanner.value = false
+      onScanSuccess(code.data)
+    } else {
+      showScanner.value = false
+      ElMessage.warning('未在图片中识别到二维码')
+    }
+  }
+  img.onerror = () => {
+    showScanner.value = false
+    ElMessage.error('图片加载失败')
+  }
+  img.src = dataUrl
+}
+
 const onScanSuccess = (code) => {
   const trimmed = (code || '').trim()
-  if (!trimmed) {
-    ElMessage.warning('二维码内容为空')
-    return
-  }
+  if (!trimmed) { ElMessage.warning('二维码内容为空'); return }
   form.value.asset_code = trimmed
   ElMessage.success('扫码成功：' + trimmed)
   onAssetBlur()
 }
 
-const closeScanner = () => {
-  stopCamera()
-  showScanner.value = false
-}
-
+const closeScanner = () => { stopCamera(); showScanner.value = false }
 const stopCamera = () => {
   if (rafId) { cancelAnimationFrame(rafId); rafId = null }
   if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null }
-  if (videoEl.value) { videoEl.value.srcObject = null }
+  if (videoEl.value) videoEl.value.srcObject = null
 }
-
 onUnmounted(() => stopCamera())
 
-// 资产查询
 const onAssetBlur = async () => {
   const code = form.value.asset_code.trim()
   if (!code) return
@@ -201,12 +227,8 @@ const onAssetBlur = async () => {
     if (res?.data?.data) {
       assetInfo.value = res.data.data
       form.value.asset_name = res.data.data.name || code
-    } else {
-      assetInfo.value = null
-    }
-  } catch (e) {
-    assetInfo.value = null
-  }
+    } else { assetInfo.value = null }
+  } catch (e) { assetInfo.value = null }
 }
 
 onMounted(() => {
@@ -214,7 +236,6 @@ onMounted(() => {
   if (code) { form.value.asset_code = String(code); onAssetBlur() }
 })
 
-// 提交
 const handleSubmit = async () => {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
@@ -225,52 +246,21 @@ const handleSubmit = async () => {
     resetForm()
   } catch (e) {
     ElMessage.error('提交失败：' + (e?.response?.data?.message || e.message))
-  } finally {
-    submitting.value = false
-  }
+  } finally { submitting.value = false }
 }
 
-const resetForm = () => {
-  formRef.value.resetFields()
-  assetInfo.value = null
-}
+const resetForm = () => { formRef.value.resetFields(); assetInfo.value = null }
 </script>
 
 <style scoped>
-.scanner-modal {
-  position: fixed; inset: 0;
-  background: #000; z-index: 9999;
-  display: flex; flex-direction: column;
-}
-.scanner-header {
-  background: rgba(0,0,0,0.8); color: #fff;
-  padding: 16px 20px;
-  display: flex; justify-content: space-between; font-size: 16px;
-}
-.scanner-body {
-  flex: 1; position: relative;
-  display: flex; align-items: center; justify-content: center;
-}
+.scanner-modal { position: fixed; inset: 0; background: #000; z-index: 9999; display: flex; flex-direction: column; }
+.scanner-header { background: rgba(0,0,0,0.8); color: #fff; padding: 16px 20px; display: flex; justify-content: space-between; font-size: 16px; }
+.scanner-body { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .scanner-video { width: 100%; height: 100%; object-fit: cover; }
 .scanner-canvas { display: none; }
-.scanner-overlay {
-  position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  pointer-events: none;
-}
-.scan-frame {
-  width: 240px; height: 240px;
-  border: 3px solid rgba(64,158,255,0.8);
-  border-radius: 16px;
-  box-shadow: 0 0 0 4000px rgba(0,0,0,0.5);
-}
-.scanner-tip {
-  position: absolute; bottom: 80px;
-  color: #fff; font-size: 14px;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
-}
-.close-btn {
-  background: none; border: none; color: #fff;
-  font-size: 20px; cursor: pointer; padding: 0;
-}
+.scanner-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.scan-frame { width: 240px; height: 240px; border: 3px solid rgba(64,158,255,0.8); border-radius: 16px; box-shadow: 0 0 0 4000px rgba(0,0,0,0.5); }
+.scanner-tip { position: absolute; bottom: 80px; color: #fff; font-size: 14px; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+.close-btn { background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; padding: 0; }
+.capture-btn { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: #409EFF; color: #fff; border: none; padding: 12px 32px; border-radius: 30px; font-size: 16px; cursor: pointer; }
 </style>
