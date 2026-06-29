@@ -24,6 +24,7 @@
             <div class="scan-frame"></div>
           </div>
           <button class="capture-btn" @click="capturePhoto">📸 拍照</button>
+        <button class="album-btn" @click="pickFromAlbum" style="position:absolute;bottom:20px;right:20px;background:#67c23a;color:#fff;border:none;padding:10px 20px;border-radius:20px;font-size:14px;cursor:pointer">🖼️ 相册</button>
         </div>
       </div>
     </el-card>
@@ -79,6 +80,25 @@ const startScan = async () => {
   await tryCapacitorCamera()
 }
 
+
+const pickFromAlbum = () => {
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'image/*'
+  input.onchange = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      scanImageData(ev.target.result).then(ok => {
+        if (!ok) ElMessage.warning('未在图片中识别到二维码')
+        scanning.value = false
+      })
+    }
+    reader.readAsDataURL(file)
+  }
+  input.click()
+}
 const scanLoop = () => {
   if (!scanning.value || !videoEl.value || !canvasEl.value) return
   const video = videoEl.value
