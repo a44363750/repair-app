@@ -52,7 +52,8 @@
           <div class="scan-frame"></div>
           <p class="scanner-tip">将二维码放入框内，自动扫描</p>
         </div>
-        <button v-if="showCaptureBtn" class="capture-btn" @click="capturePhoto">📸 拍照</button>
+                <button v-if="showCaptureBtn" class="capture-btn" @click="capturePhoto">📸 拍照</button>
+        <button class="album-btn" @click="pickFromAlbum">🖼️ 相册</button>
       </div>
     </div>
   </div>
@@ -178,7 +179,7 @@ const captureAndScan = async () => {
   }
 }
 
-const scanImageData = async (dataUrl) => {
+const scanImageData = async (dataUrl) => { let resolved = false; const resultPromise = new Promise(resolve => { setTimeout(() => { if (!resolved) resolve(false) }, 15000) }); const checkResult = (ok) => { resolved = true; return ok };
   const canvas = canvasEl.value
   const ctx = canvas.getContext('2d')
   const img = new Image()
@@ -189,11 +190,9 @@ const scanImageData = async (dataUrl) => {
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
     const code = window.jsQR ? window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' }) : null
     if (code && code.data) {
-      showScanner.value = false
-      onScanSuccess(code.data)
+      checkResult(true); showScanner.value = false; onScanSuccess(code.data)
     } else {
-      showScanner.value = false
-      ElMessage.warning('未在图片中识别到二维码')
+      checkResult(false); showScanner.value = false
     }
   }
   img.onerror = () => {
@@ -263,4 +262,5 @@ const resetForm = () => { formRef.value.resetFields(); assetInfo.value = null }
 .scanner-tip { position: absolute; bottom: 80px; color: #fff; font-size: 14px; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
 .close-btn { background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; padding: 0; }
 .capture-btn { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: #409EFF; color: #fff; border: none; padding: 12px 32px; border-radius: 30px; font-size: 16px; cursor: pointer; }
+.album-btn { position: absolute; bottom: 20px; right: 20px; background: #67c23a; color: #fff; border: none; padding: 10px 20px; border-radius: 20px; font-size: 14px; cursor: pointer; }
 </style>
