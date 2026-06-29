@@ -194,7 +194,7 @@ const onAssetBlur = async () => {
   const code = form.value.asset_code.trim()
   if (!code) return
   try {
-    const res = await repairApi.value.publicGetAssetInfo(code)
+    const res = await repairApi.publicGetAssetInfo(code)
     if (res?.data?.data) {
       assetInfo.value = res.data.data
       form.value.asset_name = res.data.data.name || code
@@ -217,7 +217,7 @@ const handleSubmit = async () => {
   if (!valid) return
   submitting.value = true
   try {
-    await repairApi.value.createRepairOrder(form.value)
+    await repairApi.createRepairOrder(form.value)
     ElMessage.success('报修提交成功')
     resetForm()
   } catch (e) {
