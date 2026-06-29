@@ -87,62 +87,7 @@ const rules = {
 }
 
 // Capacitor WebView 环境：navigator.mediaDevices 不存在，需要通过插件获取视频流
-const openScanner = async () => {
-  showScanner.value = true
 
-  try {
-    // 尝试 Capacitor 原生方式获取摄像头
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment' }
-    })
-    videoEl.value.srcObject = mediaStream
-    videoEl.value.onloadedmetadata = () => {
-      videoEl.value.play()
-      scanLoop()
-    }
-  } catch (e) {
-    // Capacitor WebView 没有 getUserMedia，加载 Camera 插件 polyfill
-    console.warn('getUserMedia not available, trying Camera polyfill:', e)
-    try {
-      const { Camera } = window.Capacitor.Plugins
-      if (Camera) {
-        const img = await Camera.getPhoto({
-          quality: 90,
-          allowEditing: false,
-          resultType: 'base64',
-          source: 'CAMERA'
-        })
-        // 将照片绘制到 canvas 并用 jsQR 解析
-        const canvas = canvasEl.value
-        const ctx = canvas.getContext('2d')
-        const imgEl = new Image()
-        imgEl.onload = () => {
-          canvas.width = imgEl.width
-          canvas.height = imgEl.height
-          ctx.drawImage(imgEl, 0, 0)
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-          if (window.jsQR) {
-            const code = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' })
-            if (code) {
-              onScanSuccess(code.data)
-            } else {
-              ElMessage.warning('照片中未识别到二维码')
-            }
-          } else {
-            ElMessage.error('jsQR 扫码引擎未加载')
-          }
-          closeScanner()
-        }
-        imgEl.src = `data:image/jpeg;base64,${img.base64StringData}`
-        return
-      }
-    } catch (capError) {
-      console.error('Camera plugin error:', capError)
-    }
-    showScanner.value = false
-    ElMessage.error('无法打开摄像头：此浏览器不支持或未授权')
-  }
-}
 
 const scanLoop = () => {
   if (!showScanner.value || !videoEl.value || !canvasEl.value) return
@@ -176,10 +121,7 @@ const onScanSuccess = (code) => {
   onAssetBlur()
 }
 
-const closeScanner = () => {
-  stopCamera()
-  showScanner.value = false
-}
+
 
 const stopCamera = () => {
   if (rafId) { cancelAnimationFrame(rafId); rafId = null }
@@ -230,6 +172,50 @@ const handleSubmit = async () => {
 const resetForm = () => {
   formRef.value.resetFields()
   assetInfo.value = null
+}
+
+// Capacitor 环境下的扫码实现
+const openScanner = async () => {
+  showScanner.value = true
+  try {
+    // 使用 html5-qrcode 库（已通过 CDN 加载到 window.Html5Qrcode）
+    if (!window.Html5Qrcode) {
+      ElMessage.error('扫码引擎未加载，请检查网络后重试')
+      showScanner.value = false
+      return
+    }
+    const scanner = new window.Html5Qrcode('qr-reader')
+    const success = (decodedText) => {
+      scanner.stop().then(() => {
+        showScanner.value = false
+        onScanSuccess(decodedText)
+      })
+    }
+    const error = (err) => {
+      console.warn('扫码警告:', err)
+    }
+    await scanner.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 250, height: 250 } },
+      success,
+      error
+    )
+    // 保存 scanner 引用用于停止
+    window._currentScanner = scanner
+  } catch (e) {
+    console.error('扫码启动失败:', e)
+    showScanner.value = false
+    ElMessage.error('无法打开摄像头：' + (e.message || '未知错误'))
+  }
+}
+
+const closeScanner = () => {
+  if (window._currentScanner) {
+    window._currentScanner.stop().then(() => {
+      window._currentScanner = null
+    })
+  }
+  showScanner.value = false
 }
 </script>
 
