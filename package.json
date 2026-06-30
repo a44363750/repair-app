@@ -18,7 +18,8 @@
     "pinia": "^2.1.7",
     "vue": "^3.4.0",
     "vue-router": "^4.2.5",
-    "@capacitor/camera": "^8.2.0"
+    "@capacitor/camera": "^8.2.0",
+    "@capacitor-mlkit/barcode-scanning": "^1.0.0"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.0",
