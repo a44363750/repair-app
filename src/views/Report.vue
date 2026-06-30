@@ -62,6 +62,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute } from 'vue-router'
 import { repairApi } from '../api'
+import jsQR from 'jsqr'
 
 const route = useRoute()
 const formRef = ref()
@@ -99,8 +100,8 @@ const scanLoop = () => {
   const ctx = canvas.getContext('2d')
   ctx.drawImage(video, 0, 0)
   const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-  if (window.jsQR) {
-    const code = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' })
+  if (jsQR) {
+    const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' })
     if (code && code.data) {
       stopCamera()
       onScanSuccess(code.data)
@@ -177,27 +178,70 @@ const resetForm = () => {
 // Web 标准 getUserMedia 扫码
 const openScanner = async () => {
   try {
-    showScanner.value = true
-    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
-      throw new Error('getUserMedia_not_available')
-    }
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment' }
-    })
-    if (videoEl.value) {
-      videoEl.value.srcObject = mediaStream
-      videoEl.value.onloadedmetadata = () => {
-        videoEl.value.play()
-        scanLoop()
+    // Capacitor App: use Camera plugin to capture photo
+    if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Camera) {
+      try {
+        const result = await window.Capacitor.Plugins.Camera.getPhoto({
+          quality: 90,
+          allowEditing: false,
+          resultType: 'base64',
+          source: 'CAMERA',
+        })
+        if (!result || !result.base64String) {
+          ElMessage.error('未获取到图片')
+          return
+        }
+        const img = new Image()
+        img.onload = () => {
+          const canvas = canvasEl.value
+          if (!canvas) { ElMessage.error('Canvas 未就绪'); return }
+          canvas.width = img.width
+          canvas.height = img.height
+          const ctx = canvas.getContext('2d')
+          ctx.drawImage(img, 0, 0)
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          if (jsQR) {
+            const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'dontInvert' })
+            if (code && code.data) {
+              onScanSuccess(code.data)
+            } else {
+              ElMessage.warning('照片中未识别到二维码，请保持手机稳定并确保二维码清晰')
+            }
+          } else {
+            ElMessage.error('二维码识别库未加载(jsqr)，请更新APP到最新版本')
+          }
+        }
+        img.src = 'data:image/jpeg;base64,' + result.base64String
+      } catch (camErr) {
+        console.warn('Capacitor Camera error:', camErr)
+        ElMessage.error('摄像头拍照失败：' + (camErr.message || String(camErr)))
+      }
+    } else {
+      // Browser fallback: getUserMedia
+      showScanner.value = true
+      if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+        showScanner.value = false
+        ElMessage.error('当前浏览器不支持摄像头，请使用Chrome或系统浏览器')
+        return
+      }
+      mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+      if (videoEl.value) {
+        videoEl.value.srcObject = mediaStream
+        videoEl.value.onloadedmetadata = () => { videoEl.value.play(); scanLoop() }
       }
     }
   } catch (e) {
     console.warn('Camera error:', e)
     showScanner.value = false
-    if (e.message == 'getUserMedia_not_available') {
-      ElMessage.error('当前环境不支持摄像头，请检查设备权限设置')
+    const msg = String(e.message || e)
+    if (msg.includes('Permission') || msg.includes('permission')) {
+      ElMessage.error('摄像头权限被拒绝，请在系统设置中开启相机权限')
+    } else if (msg.includes('NotFoundError') || msg.includes('not found')) {
+      ElMessage.error('未找到摄像头设备')
+    } else if (msg.includes('getUserMedia_not_available')) {
+      ElMessage.error('当前浏览器不支持摄像头，请使用Chrome或系统浏览器')
     } else {
-      ElMessage.error('摄像头打开失败：' + (e.message || '未知错误'))
+      ElMessage.error('摄像头打开失败：' + msg)
     }
   }
 }
