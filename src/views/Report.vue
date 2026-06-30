@@ -176,47 +176,21 @@ const resetForm = () => {
 
 // Capacitor 环境下的扫码实现
 const openScanner = async () => {
-  // 方案：让用户从相册选择图片，用 jsQR 识别二维码
-  // 优点：不需要摄像头权限，兼容所有 Android WebView
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = 'image/*'
-  input.capture = 'environment'  // 部分浏览器会直接打开相机
-  input.onchange = (e) => {
-    const file = e.target.files[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      const img = new Image()
-      img.onload = () => {
-        const canvas = canvasEl.value
-        if (!canvas) { ElMessage.error('Canvas 未就绪'); return }
-        canvas.width = img.width
-        canvas.height = img.height
-        const ctx = canvas.getContext('2d')
-        ctx.drawImage(img, 0, 0)
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        if (typeof window.jsQR === 'function') {
-          const code = window.jsQR(imageData.data, imageData.width, imageData.height, {
-            inversionAttempts: 'dontInvert'
-          })
-          if (code && code.data) {
-            onScanSuccess(code.data)
-          } else {
-            ElMessage.warning('未在图片中识别到二维码，请确保图片中二维码清晰可见')
-          }
-        } else {
-          ElMessage.error('二维码识别引擎未加载，请检查网络后重试')
-        }
-      }
-      img.onerror = () => ElMessage.error('图片加载失败')
-      img.src = ev.target.result
+  try {
+    const { BarcodeScanner } = window.Capacitor.Plugins
+    if (!BarcodeScanner) {
+      throw new Error('BarcodeScanner plugin not available')
     }
-    reader.onerror = () => ElMessage.error('文件读取失败')
-    reader.readAsDataURL(file)
+    const { barcodes } = await BarcodeScanner.startScan()
+    if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+      onScanSuccess(barcodes[0].rawValue)
+    } else {
+      ElMessage.warning('未扫描到二维码，请保持摄像头对准二维码')
+    }
+  } catch (e) {
+    console.error('BarcodeScanner error:', e)
+    ElMessage.error('无法打开摄像头扫码：' + (e.message || '未知错误'))
   }
-  input.oncancel = () => {}
-  input.click()
 }
 
 const closeScanner = () => {
