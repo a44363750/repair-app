@@ -176,31 +176,26 @@ const resetForm = () => {
 
 // Capacitor 环境下的扫码实现
 const openScanner = async () => {
-  // 优先：使用 Capacitor 原生相机拍照 + jsQR 解析二维码
-  try {
-    const { Camera, CameraResultType } = window.Capacitor.Plugins
-    if (Camera) {
-      const photo = await Camera.getPhoto({
-        quality: 90,
-        allowEditing: false,
-        resultType: CameraResultType.Base64,
-        source: 'CAMERA'
-      })
-      if (!photo || !photo.base64StringData) {
-        ElMessage.warning('未拍摄到照片')
-        return
-      }
-      // 将 base64 照片绘制到 canvas
-      const canvas = canvasEl.value
-      if (!canvas) { ElMessage.error('Canvas 未就绪'); return }
-      const ctx = canvas.getContext('2d')
+  // 方案：让用户从相册选择图片，用 jsQR 识别二维码
+  // 优点：不需要摄像头权限，兼容所有 Android WebView
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = 'image/*'
+  input.capture = 'environment'  // 部分浏览器会直接打开相机
+  input.onchange = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
       const img = new Image()
       img.onload = () => {
+        const canvas = canvasEl.value
+        if (!canvas) { ElMessage.error('Canvas 未就绪'); return }
         canvas.width = img.width
         canvas.height = img.height
+        const ctx = canvas.getContext('2d')
         ctx.drawImage(img, 0, 0)
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        // jsQR 已在 window.jsQR 中（本地加载 /jsQR.min.js）
         if (typeof window.jsQR === 'function') {
           const code = window.jsQR(imageData.data, imageData.width, imageData.height, {
             inversionAttempts: 'dontInvert'
@@ -208,37 +203,20 @@ const openScanner = async () => {
           if (code && code.data) {
             onScanSuccess(code.data)
           } else {
-            ElMessage.warning('照片中未识别到二维码，请保持手机稳定并重试')
+            ElMessage.warning('未在图片中识别到二维码，请确保图片中二维码清晰可见')
           }
         } else {
           ElMessage.error('二维码识别引擎未加载，请检查网络后重试')
         }
       }
-      img.onerror = () => ElMessage.error('照片加载失败')
-      img.src = 'data:image/jpeg;base64,' + photo.base64StringData
-      return
+      img.onerror = () => ElMessage.error('图片加载失败')
+      img.src = ev.target.result
     }
-  } catch (e) {
-    console.warn('Capacitor Camera 不可用:', e)
+    reader.onerror = () => ElMessage.error('文件读取失败')
+    reader.readAsDataURL(file)
   }
-
-  // 备用：getUserMedia 实时预览扫码（部分浏览器支持）
-  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-    try {
-      showScanner.value = true
-      mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-      videoEl.value.srcObject = mediaStream
-      videoEl.value.onloadedmetadata = () => {
-        videoEl.value.play()
-        scanLoop()
-      }
-      return
-    } catch (e2) {
-      console.warn('getUserMedia failed:', e2)
-    }
-  }
-
-  ElMessage.error('无法打开摄像头，请使用系统浏览器或检查权限设置')
+  input.oncancel = () => {}
+  input.click()
 }
 
 const closeScanner = () => {
