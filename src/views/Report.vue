@@ -174,31 +174,36 @@ const resetForm = () => {
   assetInfo.value = null
 }
 
-// Capacitor 环境下的扫码实现
+// Web 标准 getUserMedia 扫码
 const openScanner = async () => {
   try {
-    const { BarcodeScanner } = window.Capacitor.Plugins
-    if (!BarcodeScanner) {
-      throw new Error('BarcodeScanner plugin not available')
+    showScanner.value = true
+    if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+      throw new Error('getUserMedia_not_available')
     }
-    const { barcodes } = await BarcodeScanner.startScan()
-    if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
-      onScanSuccess(barcodes[0].rawValue)
-    } else {
-      ElMessage.warning('未扫描到二维码，请保持摄像头对准二维码')
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' }
+    })
+    if (videoEl.value) {
+      videoEl.value.srcObject = mediaStream
+      videoEl.value.onloadedmetadata = () => {
+        videoEl.value.play()
+        scanLoop()
+      }
     }
   } catch (e) {
-    console.error('BarcodeScanner error:', e)
-    ElMessage.error('无法打开摄像头扫码：' + (e.message || '未知错误'))
+    console.warn('Camera error:', e)
+    showScanner.value = false
+    if (e.message == 'getUserMedia_not_available') {
+      ElMessage.error('当前环境不支持摄像头，请检查设备权限设置')
+    } else {
+      ElMessage.error('摄像头打开失败：' + (e.message || '未知错误'))
+    }
   }
 }
 
 const closeScanner = () => {
-  if (window._currentScanner) {
-    window._currentScanner.stop().then(() => {
-      window._currentScanner = null
-    })
-  }
+  stopCamera()
   showScanner.value = false
 }
 </script>
